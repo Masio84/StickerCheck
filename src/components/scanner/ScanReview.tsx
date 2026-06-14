@@ -55,6 +55,7 @@ export function ScanReview({ cells, onToggle, onConfirm, saving }: ScanReviewPro
               </p>
               <p className="mt-1 text-xs text-slate-600">
                 Confianza: {Math.round(cell.confidence * 100)}%
+                {cell.matchSource ? ` · ${cell.matchSource}` : ""}
               </p>
             </button>
           ))}

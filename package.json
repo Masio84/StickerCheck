@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed": "tsx scripts/seed-world-cup-2026.ts"
+    "seed": "tsx --env-file=.env.local scripts/seed-world-cup-2026.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

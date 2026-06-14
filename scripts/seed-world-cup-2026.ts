@@ -1,18 +1,17 @@
 /**
- * Seed script for World Cup 2026 Panini collection.
+ * Seed script for World Cup 2026 Panini — full 992 stickers from CSV.
  *
  * Usage:
- *   1. Copy .env.example to .env.local and fill Supabase credentials
- *   2. Run the SQL migration in Supabase SQL Editor
- *   3. npx tsx scripts/seed-world-cup-2026.ts
+ *   1. Run migrations 001 + 002 in Supabase SQL Editor
+ *   2. npm run seed
  */
 
 import { createClient } from "@supabase/supabase-js";
 import {
-  albumPageLayouts,
-  getTotalStickerCount,
-  worldCup2026Seed,
-} from "../src/lib/seed-data";
+  buildAlbumSections,
+  getDefaultCsvPath,
+  parseAlbumCsv,
+} from "../src/lib/album-csv";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -25,9 +24,14 @@ if (!url || !serviceKey) {
 const supabase = createClient(url, serviceKey);
 
 async function seed() {
-  console.log("Seeding World Cup 2026 Panini...");
+  const csvPath = getDefaultCsvPath();
+  console.log(`Reading ${csvPath}...`);
 
-  const totalCount = getTotalStickerCount();
+  const rows = parseAlbumCsv(csvPath);
+  const sections = buildAlbumSections(rows);
+  const categories = [...new Set(rows.map((r) => r.seccionAlbum))];
+
+  console.log(`Found ${rows.length} stickers in ${sections.length} album pages`);
 
   const { data: collection, error: colError } = await supabase
     .from("collections")
@@ -35,7 +39,7 @@ async function seed() {
       {
         slug: "world-cup-2026-panini",
         name: "World Cup 2026 Stickers Panini",
-        total_count: totalCount,
+        total_count: rows.length,
         year: 2026,
       },
       { onConflict: "slug" }
@@ -44,90 +48,84 @@ async function seed() {
     .single();
 
   if (colError) throw colError;
-  console.log(`Collection: ${collection.name} (${totalCount} stickers)`);
 
-  const stickerIdByCode: Record<string, string> = {};
+  const categoryIdByName: Record<string, string> = {};
 
-  for (let catIndex = 0; catIndex < worldCup2026Seed.length; catIndex++) {
-    const cat = worldCup2026Seed[catIndex];
-
-    const { data: category, error: catError } = await supabase
+  for (let i = 0; i < categories.length; i++) {
+    const name = categories[i];
+    const { data: existing } = await supabase
       .from("categories")
-      .upsert(
-        {
-          collection_id: collection.id,
-          name: cat.name,
-          sort_order: catIndex,
-        },
-        { onConflict: "collection_id,name" }
-      )
-      .select()
-      .single();
+      .select("id")
+      .eq("collection_id", collection.id)
+      .eq("name", name)
+      .maybeSingle();
 
-    if (catError) {
-      const { data: existing } = await supabase
-        .from("categories")
-        .select()
-        .eq("collection_id", collection.id)
-        .eq("name", cat.name)
-        .single();
-
-      if (!existing) throw catError;
-
-      for (let i = 0; i < cat.stickers.length; i++) {
-        const sticker = cat.stickers[i];
-        const { data: s } = await supabase
-          .from("stickers")
-          .upsert(
-            {
-              collection_id: collection.id,
-              category_id: existing.id,
-              code: sticker.code,
-              name: sticker.name,
-              number: sticker.number,
-              sort_order: i,
-            },
-            { onConflict: "collection_id,code" }
-          )
-          .select()
-          .single();
-        if (s) stickerIdByCode[s.code] = s.id;
-      }
+    if (existing) {
+      categoryIdByName[name] = existing.id;
       continue;
     }
 
-    for (let i = 0; i < cat.stickers.length; i++) {
-      const sticker = cat.stickers[i];
-      const { data: s, error: sError } = await supabase
-        .from("stickers")
-        .upsert(
-          {
-            collection_id: collection.id,
-            category_id: category.id,
-            code: sticker.code,
-            name: sticker.name,
-            number: sticker.number,
-            sort_order: i,
-          },
-          { onConflict: "collection_id,code" }
-        )
-        .select()
-        .single();
+    const { data: category, error } = await supabase
+      .from("categories")
+      .insert({
+        collection_id: collection.id,
+        name,
+        sort_order: i,
+      })
+      .select()
+      .single();
 
-      if (sError) throw sError;
-      stickerIdByCode[s.code] = s.id;
-    }
+    if (error) throw error;
+    categoryIdByName[name] = category.id;
   }
 
-  for (const layout of albumPageLayouts) {
+  const stickerIdByCode: Record<string, string> = {};
+  const BATCH = 100;
+
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const batch = rows.slice(i, i + BATCH).map((row) => ({
+      collection_id: collection.id,
+      category_id: categoryIdByName[row.seccionAlbum],
+      code: row.code,
+      name: row.nombre,
+      number: row.orden,
+      sort_order: row.orden,
+      key_code: row.clave,
+      album_number: row.numeroAlbum,
+      country: row.pais || null,
+      country_code: row.codigoPais || null,
+      group_name: row.grupo || null,
+      sticker_type: row.tipo || null,
+      source: row.origen || null,
+    }));
+
+    const { data, error } = await supabase
+      .from("stickers")
+      .upsert(batch, { onConflict: "collection_id,code" })
+      .select("id, code");
+
+    if (error) throw error;
+    data?.forEach((s) => {
+      stickerIdByCode[s.code] = s.id;
+    });
+
+    console.log(`Stickers ${Math.min(i + BATCH, rows.length)}/${rows.length}`);
+  }
+
+  for (const section of sections) {
     const { data: page, error: pageError } = await supabase
       .from("album_pages")
       .upsert(
         {
           collection_id: collection.id,
-          page_number: layout.page_number,
-          rows: layout.rows,
-          cols: layout.cols,
+          page_number: section.pageNumber,
+          rows: section.rows,
+          cols: section.cols,
+          section_name: section.sectionName,
+          layout_json: {
+            section: section.sectionName,
+            sticker_codes: section.stickers.map((s) => s.code),
+          },
         },
         { onConflict: "collection_id,page_number" }
       )
@@ -136,27 +134,28 @@ async function seed() {
 
     if (pageError) throw pageError;
 
-    for (let i = 0; i < layout.sticker_codes.length; i++) {
-      const code = layout.sticker_codes[i];
-      const stickerId = stickerIdByCode[code];
-      if (!stickerId) continue;
-
-      const row = Math.floor(i / layout.cols);
-      const col = i % layout.cols;
-
-      await supabase.from("page_stickers").upsert(
-        {
+    const pageMappings = section.stickers
+      .map((sticker, index) => {
+        const stickerId = stickerIdByCode[sticker.code];
+        if (!stickerId) return null;
+        return {
           album_page_id: page.id,
           sticker_id: stickerId,
-          row_index: row,
-          col_index: col,
-        },
-        { onConflict: "album_page_id,row_index,col_index" }
-      );
+          row_index: Math.floor(index / section.cols),
+          col_index: index % section.cols,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+
+    if (pageMappings.length > 0) {
+      const { error } = await supabase
+        .from("page_stickers")
+        .upsert(pageMappings, { onConflict: "album_page_id,row_index,col_index" });
+      if (error) throw error;
     }
   }
 
-  console.log("Seed completed successfully!");
+  console.log(`Seed completed: ${rows.length} stickers, ${sections.length} pages`);
 }
 
 seed().catch((err) => {

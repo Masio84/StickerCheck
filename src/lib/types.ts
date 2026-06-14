@@ -25,6 +25,13 @@ export interface Sticker {
   name: string;
   number: number | null;
   sort_order: number;
+  key_code?: string | null;
+  album_number?: string | null;
+  country?: string | null;
+  country_code?: string | null;
+  group_name?: string | null;
+  sticker_type?: string | null;
+  source?: string | null;
 }
 
 export interface UserSticker {
@@ -42,10 +49,15 @@ export interface AlbumPage {
   page_number: number;
   rows: number;
   cols: number;
+  section_name?: string | null;
   margin_top: number;
   margin_left: number;
   margin_bottom: number;
   margin_right: number;
+  layout_json?: {
+    section?: string;
+    sticker_codes?: string[];
+  } | null;
 }
 
 export interface PageSticker {
@@ -65,6 +77,7 @@ export interface ScanCellResult {
   stickerName: string | null;
   confidence: number;
   selected: boolean;
+  matchSource?: "position" | "ocr" | "both";
 }
 
 export interface ScanResult {

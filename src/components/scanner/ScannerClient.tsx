@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import type {
@@ -15,14 +15,18 @@ import { PageSelector } from "@/components/scanner/PageSelector";
 import { ScanReview } from "@/components/scanner/ScanReview";
 import { cropCell, extractCells } from "@/lib/scanner/grid";
 import { detectFilled } from "@/lib/scanner/detect";
-import { parseStickerCode, recognizeCell } from "@/lib/scanner/ocr";
+import { recognizeCell, resolveStickerFromOcr } from "@/lib/scanner/ocr";
+import {
+  matchStickerByPosition,
+  type StickerMatchInput,
+} from "@/lib/sticker-matcher";
 import { createClient } from "@/lib/supabase/client";
 
 interface ScannerClientProps {
   collection: Collection;
   stickers: Sticker[];
   albumPages: AlbumPage[];
-  pageStickers: (PageSticker & { sticker?: Sticker })[];
+  pageStickers: PageSticker[];
 }
 
 type Step = "setup" | "capture" | "processing" | "review";
@@ -34,16 +38,52 @@ export function ScannerClient({
   pageStickers,
 }: ScannerClientProps) {
   const [step, setStep] = useState<Step>("setup");
-  const [pageNumber, setPageNumber] = useState(1);
-  const [rows, setRows] = useState(3);
-  const [cols, setCols] = useState(3);
+  const [pageNumber, setPageNumber] = useState(albumPages[0]?.page_number ?? 1);
+  const [rows, setRows] = useState(albumPages[0]?.rows ?? 4);
+  const [cols, setCols] = useState(albumPages[0]?.cols ?? 5);
   const [cells, setCells] = useState<ScanCellResult[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const supabase = createClient();
 
-  const stickerByCode = Object.fromEntries(stickers.map((s) => [s.code, s]));
-  const stickerById = Object.fromEntries(stickers.map((s) => [s.id, s]));
+  const stickerById = useMemo(
+    () => Object.fromEntries(stickers.map((s) => [s.id, s])),
+    [stickers]
+  );
+
+  const currentPage = albumPages.find((p) => p.page_number === pageNumber);
+
+  const currentPageStickers = useMemo(() => {
+    if (!currentPage) return [];
+    return pageStickers.filter((ps) => ps.album_page_id === currentPage.id);
+  }, [currentPage, pageStickers]);
+
+  const pageStickerCandidates = useMemo<StickerMatchInput[]>(() => {
+    const ids = new Set(currentPageStickers.map((ps) => ps.sticker_id));
+    return stickers
+      .filter((s) => ids.has(s.id))
+      .map((s) => ({
+        id: s.id,
+        code: s.code,
+        key_code: s.key_code,
+        album_number: s.album_number,
+        name: s.name,
+        number: s.number,
+      }));
+  }, [currentPageStickers, stickers]);
+
+  const allStickerCandidates = useMemo<StickerMatchInput[]>(
+    () =>
+      stickers.map((s) => ({
+        id: s.id,
+        code: s.code,
+        key_code: s.key_code,
+        album_number: s.album_number,
+        name: s.name,
+        number: s.number,
+      })),
+    [stickers]
+  );
 
   const applyPageLayout = useCallback(
     (page: number) => {
@@ -61,34 +101,40 @@ export function ScannerClient({
     applyPageLayout(page);
   };
 
-  const getStickerForCell = (
+  const resolveSticker = (
     row: number,
     col: number,
-    ocrCode: string | null
-  ): Sticker | null => {
-    const page = albumPages.find((p) => p.page_number === pageNumber);
-    if (page) {
-      const mapping = pageStickers.find(
-        (ps) =>
-          ps.album_page_id === page.id &&
-          ps.row_index === row &&
-          ps.col_index === col
-      );
-      if (mapping?.sticker_id) return stickerById[mapping.sticker_id] ?? null;
-    }
+    ocrText: string | null,
+    filled: boolean
+  ): {
+    sticker: StickerMatchInput | null;
+    matchSource?: ScanCellResult["matchSource"];
+  } => {
+    const byPosition = matchStickerByPosition(
+      row,
+      col,
+      currentPageStickers,
+      stickerById
+    );
 
-    if (ocrCode) {
-      const direct = stickerByCode[ocrCode];
-      if (direct) return direct;
-      const fuzzy = stickers.find(
-        (s) =>
-          s.code.replace(/\s/g, "") === ocrCode.replace(/\s/g, "") ||
-          String(s.number) === ocrCode
-      );
-      if (fuzzy) return fuzzy;
-    }
+    const ocrMatch = ocrText
+      ? resolveStickerFromOcr(ocrText, pageStickerCandidates) ||
+        resolveStickerFromOcr(ocrText, allStickerCandidates)
+      : null;
 
-    return null;
+    if (byPosition && ocrMatch && byPosition.id === ocrMatch.id) {
+      return { sticker: byPosition, matchSource: "both" };
+    }
+    if (byPosition && filled) {
+      return { sticker: byPosition, matchSource: "position" };
+    }
+    if (ocrMatch) {
+      return { sticker: ocrMatch, matchSource: "ocr" };
+    }
+    if (byPosition) {
+      return { sticker: byPosition, matchSource: "position" };
+    }
+    return { sticker: null };
   };
 
   const processImage = async (imageDataUrl: string) => {
@@ -103,7 +149,16 @@ export function ScannerClient({
         img.src = imageDataUrl;
       });
 
-      const { regions, canvas } = extractCells(img, rows, cols);
+      const margins = currentPage
+        ? {
+            top: Number(currentPage.margin_top) || 0.05,
+            left: Number(currentPage.margin_left) || 0.05,
+            bottom: Number(currentPage.margin_bottom) || 0.05,
+            right: Number(currentPage.margin_right) || 0.05,
+          }
+        : undefined;
+
+      const { regions, canvas } = extractCells(img, rows, cols, margins);
       const results: ScanCellResult[] = [];
 
       for (const region of regions) {
@@ -116,16 +171,24 @@ export function ScannerClient({
         if (detection.filled) {
           try {
             const ocr = await recognizeCell(cellCanvas);
-            ocrText = parseStickerCode(ocr.text);
+            ocrText = ocr.text || null;
             ocrConfidence = ocr.confidence;
           } catch {
             ocrText = null;
           }
         }
 
-        const sticker = detection.filled
-          ? getStickerForCell(region.row, region.col, ocrText)
-          : null;
+        const { sticker, matchSource } = resolveSticker(
+          region.row,
+          region.col,
+          ocrText,
+          detection.filled
+        );
+
+        const confidence = detection.filled
+          ? Math.max(detection.confidence, ocrConfidence) +
+            (matchSource === "both" ? 0.15 : matchSource ? 0.05 : 0)
+          : 0;
 
         results.push({
           row: region.row,
@@ -133,12 +196,11 @@ export function ScannerClient({
           filled: detection.filled,
           ocrText,
           stickerId: sticker?.id ?? null,
-          stickerCode: sticker?.code ?? ocrText,
+          stickerCode: sticker?.code ?? null,
           stickerName: sticker?.name ?? null,
-          confidence: detection.filled
-            ? Math.max(detection.confidence, ocrConfidence)
-            : 0,
+          confidence: Math.min(confidence, 1),
           selected: detection.filled && !!sticker,
+          matchSource,
         });
       }
 
@@ -186,7 +248,10 @@ export function ScannerClient({
       user_id: user.id,
       collection_id: collection.id,
       page_number: pageNumber,
-      results_json: { cells: selected },
+      results_json: {
+        section: currentPage?.section_name,
+        cells: selected,
+      },
     });
 
     setSaving(false);
@@ -209,8 +274,8 @@ export function ScannerClient({
       </p>
 
       <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200/80">
-        Consejos: usa buena luz, mantén la cámara paralela a la página y
-        ajusta filas/columnas según tu álbum.
+        Selecciona la sección del álbum (ej. MEXICO, BRAZIL). El escáner usa la
+        cuadrícula {rows}×{cols} y reconoce códigos como MEX1, FWC3 o 00.
       </div>
 
       {error && (
@@ -226,6 +291,8 @@ export function ScannerClient({
               pageNumber={pageNumber}
               rows={rows}
               cols={cols}
+              sectionName={currentPage?.section_name ?? undefined}
+              albumPages={albumPages}
               onPageChange={handlePageChange}
               onGridChange={(r, c) => {
                 setRows(r);
@@ -247,6 +314,8 @@ export function ScannerClient({
               pageNumber={pageNumber}
               rows={rows}
               cols={cols}
+              sectionName={currentPage?.section_name ?? undefined}
+              albumPages={albumPages}
               onPageChange={handlePageChange}
               onGridChange={(r, c) => {
                 setRows(r);
@@ -268,7 +337,9 @@ export function ScannerClient({
             <Loader2 className="h-10 w-10 animate-spin text-emerald-400" />
             <p className="mt-4 text-slate-400">Analizando página...</p>
             <p className="text-sm text-slate-600">
-              Detectando cromos y leyendo números
+              {currentPage?.section_name
+                ? `Sección: ${currentPage.section_name}`
+                : "Detectando cromos y leyendo códigos"}
             </p>
           </div>
         )}

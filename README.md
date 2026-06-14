@@ -50,17 +50,19 @@ SUPABASE_SERVICE_ROLE_KEY=tu-service-role-key
 
 ### 3. Base de datos
 
-En el [SQL Editor de Supabase](https://supabase.com/dashboard), ejecuta el contenido de:
+En el [SQL Editor de Supabase](https://supabase.com/dashboard), ejecuta en orden:
 
 ```
 supabase/migrations/001_initial.sql
+supabase/migrations/002_sticker_metadata.sql
 ```
 
-### 4. Seed de datos
+### 4. Seed de datos (992 cromos desde CSV)
+
+El catálogo completo está en `data/world-cup-2026-panini.csv`.
 
 ```bash
-npm install -D tsx
-npx tsx scripts/seed-world-cup-2026.ts
+npm run seed
 ```
 
 ### 5. Arrancar

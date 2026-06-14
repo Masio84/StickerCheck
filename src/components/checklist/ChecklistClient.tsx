@@ -43,7 +43,11 @@ export function ChecklistClient({
         return (
           s.code.toLowerCase().includes(q) ||
           s.name.toLowerCase().includes(q) ||
-          String(s.number).includes(q)
+          String(s.number).includes(q) ||
+          (s.key_code?.toLowerCase().includes(q) ?? false) ||
+          (s.album_number?.toLowerCase().includes(q) ?? false) ||
+          (s.country?.toLowerCase().includes(q) ?? false) ||
+          (s.country_code?.toLowerCase().includes(q) ?? false)
         );
       }
       return true;
