@@ -44,7 +44,8 @@ export function DashboardClient({
   const supabase = createClient();
 
   const selectedPage = useMemo(() => {
-    return albumPages.find((p) => p.id === selectedPageId) ?? albumPages[0];
+    if (!selectedPageId) return null;
+    return albumPages.find((p) => p.id === selectedPageId) ?? null;
   }, [albumPages, selectedPageId]);
 
   const currentPageStickers = useMemo(() => {
@@ -280,42 +281,45 @@ export function DashboardClient({
         }
       }
 
-      // Step B: Run Grid contrast checking for the detected page
-      setSelectedPageId(matchedPage.id);
-
-      let finalImageUrl = imageDataUrl;
-      const img = new Image();
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = () => reject(new Error("Error al cargar la imagen capturada."));
-        img.src = imageDataUrl;
-      });
-
-      const isImagePortrait = img.naturalHeight > img.naturalWidth;
-      const isPageLandscape = (matchedPage.cols || 5) > (matchedPage.rows || 4);
-
-      if (isImagePortrait && isPageLandscape) {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalHeight;
-        canvas.height = img.naturalWidth;
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.translate(canvas.width / 2, canvas.height / 2);
-          ctx.rotate(Math.PI / 2);
-          ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-          finalImageUrl = canvas.toDataURL("image/jpeg", 0.85);
-          setPreviewImage(finalImageUrl);
-        }
-      }
-
-      const codes = await runGridDetection(finalImageUrl, matchedPage);
-      
-      setDetectedCodes(codes);
-      setDetectedCountries(matchedPage.section_name || "Especiales");
-      setEditCodesText(codes.join(", "));
-      
       if (!found) {
+        setSelectedPageId("");
+        setDetectedCodes([]);
+        setDetectedCountries("");
+        setEditCodesText("");
         setError("No pudimos identificar la sección automáticamente. Por favor selecciónala de la lista abajo.");
+      } else {
+        setSelectedPageId(matchedPage.id);
+
+        let finalImageUrl = imageDataUrl;
+        const img = new Image();
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = () => reject(new Error("Error al cargar la imagen capturada."));
+          img.src = imageDataUrl;
+        });
+
+        const isImagePortrait = img.naturalHeight > img.naturalWidth;
+        const isPageLandscape = (matchedPage.cols || 5) > (matchedPage.rows || 4);
+
+        if (isImagePortrait && isPageLandscape) {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalHeight;
+          canvas.height = img.naturalWidth;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(Math.PI / 2);
+            ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+            finalImageUrl = canvas.toDataURL("image/jpeg", 0.85);
+            setPreviewImage(finalImageUrl);
+          }
+        }
+
+        const codes = await runGridDetection(finalImageUrl, matchedPage);
+        
+        setDetectedCodes(codes);
+        setDetectedCountries(matchedPage.section_name || "Especiales");
+        setEditCodesText(codes.join(", "));
       }
     } catch (err: any) {
       console.error(err);
@@ -530,6 +534,12 @@ export function DashboardClient({
         <button
           onClick={() => {
             setScannerOpen(true);
+            setPreviewImage(null);
+            setSelectedPageId("");
+            setDetectedCodes([]);
+            setEditCodesText("");
+            setDetectedCountries("");
+            setError(null);
             startCamera();
           }}
           className="flex flex-col items-center justify-center gap-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 py-6 px-4 font-bold text-white shadow-lg shadow-emerald-500/10 hover:shadow-emerald-500/20 transition-all transform active:scale-98 hover:scale-[1.02] cursor-pointer"
@@ -699,6 +709,7 @@ export function DashboardClient({
                     onChange={(e) => handlePageChange(e.target.value)}
                     className="w-full rounded-lg border border-slate-700 bg-slate-950 p-2.5 text-sm text-white focus:border-emerald-500 focus:outline-none cursor-pointer"
                   >
+                    <option value="" disabled>-- Selecciona un país/sección --</option>
                     {albumPages.map((page) => (
                       <option key={page.id} value={page.id}>
                         {page.section_name || `Página ${page.page_number}`}

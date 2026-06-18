@@ -134,15 +134,58 @@ async function seed() {
 
     if (pageError) throw pageError;
 
+    // Clear old mappings to avoid orphaned slots from the old 4x5 layout
+    const { error: deleteError } = await supabase
+      .from("page_stickers")
+      .delete()
+      .eq("album_page_id", page.id);
+    if (deleteError) throw deleteError;
+
+    const isTeamPage = section.stickers.length >= 18 && section.stickers.length <= 20;
+
     const pageMappings = section.stickers
       .map((sticker, index) => {
         const stickerId = stickerIdByCode[sticker.code];
         if (!stickerId) return null;
+
+        let row_index = Math.floor(index / section.cols);
+        let col_index = index % section.cols;
+
+        if (isTeamPage) {
+          // Precise physical mapping for the 3x10 double-page spread
+          const mapping = [
+            { row: 0, col: 3 }, // index 0 (MEX 1)
+            { row: 0, col: 4 }, // index 1 (MEX 2)
+            { row: 0, col: 2 }, // index 2 (MEX 3)
+            { row: 0, col: 1 }, // index 3 (MEX 4)
+            { row: 1, col: 3 }, // index 4 (MEX 5)
+            { row: 1, col: 4 }, // index 5 (MEX 6)
+            { row: 1, col: 2 }, // index 6 (MEX 7)
+            { row: 1, col: 1 }, // index 7 (MEX 8)
+            { row: 2, col: 3 }, // index 8 (MEX 9)
+            { row: 2, col: 4 }, // index 9 (MEX 10)
+            { row: 0, col: 8 }, // index 10 (MEX 11)
+            { row: 1, col: 8 }, // index 11 (MEX 12)
+            { row: 2, col: 8 }, // index 12 (MEX 13)
+            { row: 0, col: 6 }, // index 13 (MEX 14)
+            { row: 0, col: 7 }, // index 14 (MEX 15)
+            { row: 1, col: 6 }, // index 15 (MEX 16)
+            { row: 1, col: 7 }, // index 16 (MEX 17)
+            { row: 2, col: 6 }, // index 17 (MEX 18)
+            { row: 2, col: 7 }, // index 18 (MEX 19)
+            { row: 2, col: 9 }, // index 19 (MEX 20)
+          ];
+          if (index < mapping.length) {
+            row_index = mapping[index].row;
+            col_index = mapping[index].col;
+          }
+        }
+
         return {
           album_page_id: page.id,
           sticker_id: stickerId,
-          row_index: Math.floor(index / section.cols),
-          col_index: index % section.cols,
+          row_index,
+          col_index,
         };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null);
@@ -150,7 +193,7 @@ async function seed() {
     if (pageMappings.length > 0) {
       const { error } = await supabase
         .from("page_stickers")
-        .upsert(pageMappings, { onConflict: "album_page_id,row_index,col_index" });
+        .insert(pageMappings);
       if (error) throw error;
     }
   }
