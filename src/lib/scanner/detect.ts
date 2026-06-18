@@ -14,32 +14,45 @@ export function detectFilled(cellCanvas: HTMLCanvasElement): FillDetectionResult
   let sumR = 0;
   let sumG = 0;
   let sumB = 0;
-  const pixelCount = width * height;
+  let innerPixelCount = 0;
 
-  for (let i = 0; i < data.length; i += 4) {
-    sumR += data[i];
-    sumG += data[i + 1];
-    sumB += data[i + 2];
+  // Shave off 15% of borders to ignore gridlines and slight alignment offsets
+  const startX = Math.floor(width * 0.15);
+  const endX = Math.floor(width * 0.85);
+  const startY = Math.floor(height * 0.15);
+  const endY = Math.floor(height * 0.85);
+
+  for (let y = startY; y < endY; y++) {
+    for (let x = startX; x < endX; x++) {
+      const idx = (y * width + x) * 4;
+      sumR += data[idx];
+      sumG += data[idx + 1];
+      sumB += data[idx + 2];
+      innerPixelCount++;
+    }
   }
 
-  const avgR = sumR / pixelCount;
-  const avgG = sumG / pixelCount;
-  const avgB = sumB / pixelCount;
+  const avgR = sumR / innerPixelCount;
+  const avgG = sumG / innerPixelCount;
+  const avgB = sumB / innerPixelCount;
 
   let variance = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const dr = data[i] - avgR;
-    const dg = data[i + 1] - avgG;
-    const db = data[i + 2] - avgB;
-    variance += dr * dr + dg * dg + db * db;
+  for (let y = startY; y < endY; y++) {
+    for (let x = startX; x < endX; x++) {
+      const idx = (y * width + x) * 4;
+      const dr = data[idx] - avgR;
+      const dg = data[idx + 1] - avgG;
+      const db = data[idx + 2] - avgB;
+      variance += dr * dr + dg * dg + db * db;
+    }
   }
-  variance /= pixelCount;
+  variance /= innerPixelCount;
 
   let edgeCount = 0;
   const threshold = 30;
 
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
+  for (let y = startY + 1; y < endY - 1; y++) {
+    for (let x = startX + 1; x < endX - 1; x++) {
       const idx = (y * width + x) * 4;
       const gray =
         (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
@@ -59,11 +72,15 @@ export function detectFilled(cellCanvas: HTMLCanvasElement): FillDetectionResult
     }
   }
 
-  const edgeDensity = edgeCount / pixelCount;
-  const filled = variance > 800 || edgeDensity > 0.08;
+  const edgeDensity = edgeCount / innerPixelCount;
+
+  // Colorful empty slots with large white text "26" have high variance but low edge density.
+  // Pasted stickers have high variance and high edge density.
+  // Requiring BOTH variance > 2000 AND edgeDensity > 0.07 dramatically increases accuracy.
+  const filled = variance > 2000 && edgeDensity > 0.07;
   const confidence = Math.min(
     1,
-    (variance / 2000) * 0.6 + (edgeDensity / 0.15) * 0.4
+    (variance / 4000) * 0.5 + (edgeDensity / 0.15) * 0.5
   );
 
   return { filled, variance, edgeDensity, confidence };

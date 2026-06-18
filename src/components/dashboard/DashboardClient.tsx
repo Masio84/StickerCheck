@@ -282,7 +282,33 @@ export function DashboardClient({
 
       // Step B: Run Grid contrast checking for the detected page
       setSelectedPageId(matchedPage.id);
-      const codes = await runGridDetection(imageDataUrl, matchedPage);
+
+      let finalImageUrl = imageDataUrl;
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error("Error al cargar la imagen capturada."));
+        img.src = imageDataUrl;
+      });
+
+      const isImagePortrait = img.naturalHeight > img.naturalWidth;
+      const isPageLandscape = (matchedPage.cols || 5) > (matchedPage.rows || 4);
+
+      if (isImagePortrait && isPageLandscape) {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalHeight;
+        canvas.height = img.naturalWidth;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          ctx.rotate(Math.PI / 2);
+          ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+          finalImageUrl = canvas.toDataURL("image/jpeg", 0.85);
+          setPreviewImage(finalImageUrl);
+        }
+      }
+
+      const codes = await runGridDetection(finalImageUrl, matchedPage);
       
       setDetectedCodes(codes);
       setDetectedCountries(matchedPage.section_name || "Especiales");
@@ -309,7 +335,32 @@ export function DashboardClient({
     setAnalyzing(true);
     setError(null);
     try {
-      const codes = await runGridDetection(previewImage, page);
+      let finalImageUrl = previewImage;
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error("Error al cargar la imagen del preview."));
+        img.src = previewImage;
+      });
+
+      const isImagePortrait = img.naturalHeight > img.naturalWidth;
+      const isPageLandscape = (page.cols || 5) > (page.rows || 4);
+
+      if (isImagePortrait && isPageLandscape) {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalHeight;
+        canvas.height = img.naturalWidth;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          ctx.rotate(Math.PI / 2);
+          ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+          finalImageUrl = canvas.toDataURL("image/jpeg", 0.85);
+          setPreviewImage(finalImageUrl);
+        }
+      }
+
+      const codes = await runGridDetection(finalImageUrl, page);
       setDetectedCodes(codes);
       setEditCodesText(codes.join(", "));
       setDetectedCountries(page.section_name || "Especiales");
