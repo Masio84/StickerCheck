@@ -15,6 +15,7 @@ export function detectFilled(cellCanvas: HTMLCanvasElement): FillDetectionResult
   let sumR = 0;
   let sumG = 0;
   let sumB = 0;
+  let sumChroma = 0;
   let innerPixelCount = 0;
 
   // Shave off 15% of borders to ignore gridlines and slight alignment offsets
@@ -35,6 +36,11 @@ export function detectFilled(cellCanvas: HTMLCanvasElement): FillDetectionResult
       sumR += r;
       sumG += g;
       sumB += b;
+      
+      const maxVal = Math.max(r, g, b);
+      const minVal = Math.min(r, g, b);
+      sumChroma += (maxVal - minVal);
+      
       innerPixelCount++;
 
       // Color binning: 8 bins per channel (32 levels per bin)
@@ -49,6 +55,7 @@ export function detectFilled(cellCanvas: HTMLCanvasElement): FillDetectionResult
   const avgR = sumR / innerPixelCount;
   const avgG = sumG / innerPixelCount;
   const avgB = sumB / innerPixelCount;
+  const avgChroma = sumChroma / innerPixelCount;
 
   let variance = 0;
   for (let y = startY; y < endY; y++) {
@@ -107,8 +114,8 @@ export function detectFilled(cellCanvas: HTMLCanvasElement): FillDetectionResult
   // Colorful empty slots with large white text "26" have high variance but low edge density.
   // Pasted stickers have high variance and high edge density.
   // Requiring BOTH variance > 2000 AND edgeDensity > 0.07 AND NOT having a solid dominant background
-  // dramatically increases accuracy.
-  const filled = variance > 2000 && edgeDensity > 0.07 && !isSolidBackground;
+  // AND having some color saturation (avgChroma > 16) dramatically increases accuracy.
+  const filled = variance > 2000 && edgeDensity > 0.07 && !isSolidBackground && avgChroma > 16;
   const confidence = Math.min(
     1,
     (variance / 4000) * 0.5 + (edgeDensity / 0.15) * 0.5

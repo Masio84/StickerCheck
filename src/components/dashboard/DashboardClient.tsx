@@ -75,6 +75,106 @@ function rotateFullResImage(img: HTMLImageElement, rotation: number): string {
   return canvas.toDataURL("image/jpeg", 0.85);
 }
 
+function getHeaderStrip(
+  img: HTMLImageElement,
+  rotation: number,
+  targetWidth: number = 1600,
+  headerHeightRatio: number = 0.22
+): string {
+  const canvas = document.createElement("canvas");
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+
+  // Calculate size after rotation
+  let rotW = w;
+  let rotH = h;
+  if (rotation === 90 || rotation === 270) {
+    rotW = h;
+    rotH = w;
+  }
+
+  // Scale to targetWidth
+  const scale = targetWidth / rotW;
+  const scaledRotW = targetWidth;
+  const scaledRotH = Math.round(rotH * scale);
+  const cropH = Math.round(scaledRotH * headerHeightRatio);
+
+  canvas.width = scaledRotW;
+  canvas.height = cropH;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return img.src;
+
+  const tempCanvas = document.createElement("canvas");
+  tempCanvas.width = scaledRotW;
+  tempCanvas.height = scaledRotH;
+  const tempCtx = tempCanvas.getContext("2d");
+  if (!tempCtx) return img.src;
+
+  tempCtx.translate(scaledRotW / 2, scaledRotH / 2);
+  tempCtx.rotate((rotation * Math.PI) / 180);
+  
+  const drawW = rotation === 90 || rotation === 270 ? scaledRotH : scaledRotW;
+  const drawH = rotation === 90 || rotation === 270 ? scaledRotW : scaledRotH;
+  tempCtx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+
+  ctx.drawImage(tempCanvas, 0, 0, scaledRotW, cropH, 0, 0, scaledRotW, cropH);
+
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+function getLevenshteinDistance(a: string, b: string): number {
+  const matrix = Array.from({ length: a.length + 1 }, () =>
+    new Int32Array(b.length + 1)
+  );
+
+  for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
+  for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1, // deletion
+          matrix[i][j - 1] + 1, // insertion
+          matrix[i - 1][j - 1] + 1 // substitution
+        );
+      }
+    }
+  }
+  return matrix[a.length][b.length];
+}
+
+function normalizeText(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function fuzzyMatchSection(ocrText: string, sectionName: string): boolean {
+  const cleanOcr = normalizeText(ocrText);
+  const cleanSection = normalizeText(sectionName);
+  
+  if (cleanOcr.includes(cleanSection)) return true;
+  if (cleanSection.length <= 3) return cleanOcr.includes(cleanSection);
+  
+  const len = cleanSection.length;
+  for (let i = 0; i <= cleanOcr.length - len; i++) {
+    const sub = cleanOcr.substring(i, i + len);
+    const dist = getLevenshteinDistance(sub, cleanSection);
+    const maxErrors = len > 5 ? 2 : 1;
+    if (dist <= maxErrors) {
+      return true;
+    }
+  }
+  return false;
+}
+
+
 export function DashboardClient({
   collection,
   stickers,
@@ -343,8 +443,8 @@ export function DashboardClient({
       const rotations = [0, 270, 90, 180];
 
       for (const rot of rotations) {
-        // Create downscaled canvas for super fast OCR
-        const ocrImageSrc = resizeAndRotateImage(img, rot, 800);
+        // Extract the header strip at 1600px width for high-resolution legible text
+        const ocrImageSrc = getHeaderStrip(img, rot, 1600, 0.22);
         
         // Run OCR
         const { data } = await Tesseract.recognize(ocrImageSrc, "eng");
@@ -353,8 +453,7 @@ export function DashboardClient({
         // Match country/section name
         for (const page of albumPages) {
           if (page.section_name) {
-            const sectionUpper = page.section_name.toUpperCase();
-            if (cleanedText.includes(sectionUpper)) {
+            if (fuzzyMatchSection(cleanedText, page.section_name)) {
               matchedPage = page;
               correctRotation = rot;
               break;
@@ -378,10 +477,10 @@ export function DashboardClient({
         const finalImageUrl = rotateFullResImage(img, correctRotation);
         setPreviewImage(finalImageUrl);
 
-        const initL = Math.round((Number(matchedPage.margin_left) || 0.08) * 100);
-        const initR = Math.round((Number(matchedPage.margin_right) || 0.08) * 100);
-        const initT = Math.round((Number(matchedPage.margin_top) || 0.08) * 100);
-        const initB = Math.round((Number(matchedPage.margin_bottom) || 0.08) * 100);
+        const initL = Math.round((Number(matchedPage.margin_left) || (matchedPage.cols === 8 ? 0.06 : 0.08)) * 100);
+        const initR = Math.round((Number(matchedPage.margin_right) || (matchedPage.cols === 8 ? 0.06 : 0.08)) * 100);
+        const initT = Math.round((Number(matchedPage.margin_top) || (matchedPage.cols === 8 ? 0.18 : 0.08)) * 100);
+        const initB = Math.round((Number(matchedPage.margin_bottom) || (matchedPage.cols === 8 ? 0.06 : 0.08)) * 100);
         setCustomMarginLeft(initL);
         setCustomMarginRight(initR);
         setCustomMarginTop(initT);
@@ -481,17 +580,17 @@ export function DashboardClient({
         const ctx = canvas.getContext("2d");
         if (ctx) {
           ctx.translate(canvas.width / 2, canvas.height / 2);
-          ctx.rotate(Math.PI / 2);
+          ctx.rotate(-Math.PI / 2);
           ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
           finalImageUrl = canvas.toDataURL("image/jpeg", 0.85);
           setPreviewImage(finalImageUrl);
         }
       }
 
-      const initL = Math.round((Number(page.margin_left) || 0.08) * 100);
-      const initR = Math.round((Number(page.margin_right) || 0.08) * 100);
-      const initT = Math.round((Number(page.margin_top) || 0.08) * 100);
-      const initB = Math.round((Number(page.margin_bottom) || 0.08) * 100);
+      const initL = Math.round((Number(page.margin_left) || (page.cols === 8 ? 0.06 : 0.08)) * 100);
+      const initR = Math.round((Number(page.margin_right) || (page.cols === 8 ? 0.06 : 0.08)) * 100);
+      const initT = Math.round((Number(page.margin_top) || (page.cols === 8 ? 0.18 : 0.08)) * 100);
+      const initB = Math.round((Number(page.margin_bottom) || (page.cols === 8 ? 0.06 : 0.08)) * 100);
       setCustomMarginLeft(initL);
       setCustomMarginRight(initR);
       setCustomMarginTop(initT);

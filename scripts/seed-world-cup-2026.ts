@@ -113,6 +113,8 @@ async function seed() {
   }
 
   for (const section of sections) {
+    const isTeamPage = section.stickers.length >= 18 && section.stickers.length <= 20;
+    
     const { data: page, error: pageError } = await supabase
       .from("album_pages")
       .upsert(
@@ -122,6 +124,10 @@ async function seed() {
           rows: section.rows,
           cols: section.cols,
           section_name: section.sectionName,
+          margin_left: isTeamPage ? 0.06 : 0.05,
+          margin_right: isTeamPage ? 0.06 : 0.05,
+          margin_top: isTeamPage ? 0.18 : 0.05,
+          margin_bottom: isTeamPage ? 0.06 : 0.05,
           layout_json: {
             section: section.sectionName,
             sticker_codes: section.stickers.map((s) => s.code),
@@ -141,8 +147,6 @@ async function seed() {
       .eq("album_page_id", page.id);
     if (deleteError) throw deleteError;
 
-    const isTeamPage = section.stickers.length >= 18 && section.stickers.length <= 20;
-
     const pageMappings = section.stickers
       .map((sticker, index) => {
         const stickerId = stickerIdByCode[sticker.code];
@@ -153,26 +157,26 @@ async function seed() {
 
         if (isTeamPage) {
           const mapping = [
-            { row: 0, col: 3 }, // index 0 (MEX 1 / KOR 1 / CAN 1 / SCO 1) - Badge
-            { row: 1, col: 3 }, // index 1 (MEX 2 / KOR 2 / CAN 2 / SCO 2) - Goalkeeper
-            { row: 0, col: 1 }, // index 2 (MEX 3 / KOR 3 / CAN 3 / SCO 3)
-            { row: 1, col: 1 }, // index 3 (MEX 4 / KOR 4 / CAN 4 / SCO 4)
-            { row: 2, col: 1 }, // index 4 (MEX 5 / KOR 5 / CAN 5 / SCO 5)
-            { row: 3, col: 1 }, // index 5 (MEX 6 / KOR 6 / CAN 6 / SCO 6)
-            { row: 0, col: 2 }, // index 6 (MEX 7 / KOR 7 / CAN 7 / SCO 7)
-            { row: 1, col: 2 }, // index 7 (MEX 8 / KOR 8 / CAN 8 / SCO 8)
-            { row: 2, col: 2 }, // index 8 (MEX 9 / KOR 9 / CAN 9 / SCO 9)
-            { row: 3, col: 2 }, // index 9 (MEX 10 / KOR 10 / CAN 10 / SCO 10)
-            { row: 0, col: 6 }, // index 10 (MEX 11 / KOR 11 / CAN 11 / SCO 11) - Right page top-right
-            { row: 1, col: 6 }, // index 11 (MEX 12 / KOR 12 / CAN 12 / SCO 12)
-            { row: 2, col: 6 }, // index 12 (MEX 13 / KOR 13 / CAN 13 / SCO 13)
+            { row: 0, col: 3 }, // index 0 (Badge)
+            { row: 1, col: 3 }, // index 1 (Goalkeeper)
+            { row: 0, col: 1 }, // index 2
+            { row: 1, col: 1 }, // index 3
+            { row: 2, col: 1 }, // index 4
+            { row: 3, col: 1 }, // index 5
+            { row: 0, col: 2 }, // index 6
+            { row: 1, col: 2 }, // index 7
+            { row: 2, col: 2 }, // index 8
+            { row: 3, col: 2 }, // index 9
+            { row: 0, col: 4 }, // index 10 (MEX 11 / KOR 11 / CAN 11 / SCO 11) - Left column of right page (swapped)
+            { row: 1, col: 4 }, // index 11 (MEX 12 / KOR 12 / CAN 12 / SCO 12)
+            { row: 2, col: 4 }, // index 12 (MEX 13 / KOR 13 / CAN 13 / SCO 13) - Squad
             { row: 0, col: 5 }, // index 13 (MEX 14 / KOR 14 / CAN 14 / SCO 14)
             { row: 1, col: 5 }, // index 14 (MEX 15 / KOR 15 / CAN 15 / SCO 15)
             { row: 2, col: 5 }, // index 15 (MEX 16 / KOR 16 / CAN 16 / SCO 16)
             { row: 3, col: 5 }, // index 16 (MEX 17 / KOR 17 / CAN 17 / SCO 17)
-            { row: 1, col: 4 }, // index 17 (MEX 18 / KOR 18 / CAN 18 / SCO 18)
-            { row: 2, col: 4 }, // index 18 (MEX 19 / KOR 19 / CAN 19 / SCO 19)
-            { row: 3, col: 4 }, // index 19 (MEX 20 / KOR 20 / CAN 20 / SCO 20)
+            { row: 1, col: 6 }, // index 17 (MEX 18 / KOR 18 / CAN 18 / SCO 18) - Right column of right page
+            { row: 2, col: 6 }, // index 18 (MEX 19 / KOR 19 / CAN 19 / SCO 19)
+            { row: 3, col: 6 }, // index 19 (MEX 20 / KOR 20 / CAN 20 / SCO 20)
           ];
           if (index < mapping.length) {
             row_index = mapping[index].row;

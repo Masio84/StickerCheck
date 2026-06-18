@@ -27,7 +27,7 @@ export function parseOcrCandidates(text: string): string[] {
 
   const patterns = [
     /\b(FWC)\s*(\d{1,2})\b/g,
-    /\b(MEX|RSA|KOR|CZE|CAN|BIH|QAT|SUI|BRA|MAR|HTI|SCO|USA|PAR|AUS|TUR|GER|CUW|CIV|ECU|NED|JPN|SWE|TUN|BEL|EGY|IRN|NZL|ESP|CPV|KSA|URU|FRA|SEN|IRQ|NOR|ARG|ALG|AUT|JOR|POR|COD|UZB|COL|ENG|CRO|GHA|PAN)\s*(\d{1,2})\b/g,
+    /\b([A-Z]{3,4})\s*(\d{1,2})\b/g,
     /\b(\d{1,2})\b/g,
   ];
 

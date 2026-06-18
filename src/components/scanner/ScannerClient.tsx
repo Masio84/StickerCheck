@@ -156,10 +156,10 @@ export function ScannerClient({
 
       const margins = currentPage
         ? {
-            top: Number(currentPage.margin_top) || 0.05,
-            left: Number(currentPage.margin_left) || 0.05,
-            bottom: Number(currentPage.margin_bottom) || 0.05,
-            right: Number(currentPage.margin_right) || 0.05,
+            top: Number(currentPage.margin_top) || (cols === 8 ? 0.18 : 0.05),
+            left: Number(currentPage.margin_left) || (cols === 8 ? 0.06 : 0.05),
+            bottom: Number(currentPage.margin_bottom) || (cols === 8 ? 0.06 : 0.05),
+            right: Number(currentPage.margin_right) || (cols === 8 ? 0.06 : 0.05),
           }
         : undefined;
 
