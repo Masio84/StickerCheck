@@ -95,6 +95,12 @@ export function DashboardClient({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
+  const [customMarginLeft, setCustomMarginLeft] = useState(8);
+  const [customMarginRight, setCustomMarginRight] = useState(8);
+  const [customMarginTop, setCustomMarginTop] = useState(8);
+  const [customMarginBottom, setCustomMarginBottom] = useState(8);
+  const [showGridSettings, setShowGridSettings] = useState(false);
+  
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -266,17 +272,18 @@ export function DashboardClient({
   // 3. Run filled detection by page grid
   const runGridDetection = (
     imageDataUrl: string,
-    page: AlbumPage
+    page: AlbumPage,
+    customMargins?: { top: number; left: number; bottom: number; right: number }
   ): Promise<string[]> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
         try {
-          const margins = {
-            top: Number(page.margin_top) || 0.05,
-            left: Number(page.margin_left) || 0.05,
-            bottom: Number(page.margin_bottom) || 0.05,
-            right: Number(page.margin_right) || 0.05,
+          const margins = customMargins || {
+            top: customMarginTop / 100,
+            left: customMarginLeft / 100,
+            bottom: customMarginBottom / 100,
+            right: customMarginRight / 100,
           };
 
           const { regions, canvas } = extractCells(img, page.rows, page.cols, margins);
@@ -371,7 +378,21 @@ export function DashboardClient({
         const finalImageUrl = rotateFullResImage(img, correctRotation);
         setPreviewImage(finalImageUrl);
 
-        const codes = await runGridDetection(finalImageUrl, matchedPage);
+        const initL = Math.round((Number(matchedPage.margin_left) || 0.08) * 100);
+        const initR = Math.round((Number(matchedPage.margin_right) || 0.08) * 100);
+        const initT = Math.round((Number(matchedPage.margin_top) || 0.08) * 100);
+        const initB = Math.round((Number(matchedPage.margin_bottom) || 0.08) * 100);
+        setCustomMarginLeft(initL);
+        setCustomMarginRight(initR);
+        setCustomMarginTop(initT);
+        setCustomMarginBottom(initB);
+
+        const codes = await runGridDetection(finalImageUrl, matchedPage, {
+          left: initL / 100,
+          right: initR / 100,
+          top: initT / 100,
+          bottom: initB / 100,
+        });
         
         setDetectedCodes(codes);
         setDetectedCountries(matchedPage.section_name || "Especiales");
@@ -384,6 +405,53 @@ export function DashboardClient({
       setDetectedCountries("Error");
     } finally {
       setAnalyzing(false);
+    }
+  }
+
+  async function handleReRunGrid(l: number, r: number, t: number, b: number) {
+    if (!previewImage || !selectedPage) return;
+    try {
+      const margins = {
+        top: t / 100,
+        left: l / 100,
+        bottom: b / 100,
+        right: r / 100,
+      };
+
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const { regions, canvas } = extractCells(img, selectedPage.rows, selectedPage.cols, margins);
+          const codes: string[] = [];
+          const currentPageStickers = pageStickers.filter(
+            (ps) => ps.album_page_id === selectedPage.id
+          );
+          const stickerById = Object.fromEntries(stickers.map((s) => [s.id, s]));
+
+          regions.forEach((region) => {
+            const cellCanvas = cropCell(canvas, region);
+            const detection = detectFilled(cellCanvas);
+            if (detection.filled) {
+              const match = currentPageStickers.find(
+                (ps) => ps.row_index === region.row && ps.col_index === region.col
+              );
+              if (match) {
+                const sticker = stickerById[match.sticker_id];
+                if (sticker) {
+                  codes.push(sticker.key_code || sticker.code);
+                }
+              }
+            }
+          });
+          setDetectedCodes(codes);
+          setEditCodesText(codes.join(", "));
+        } catch (e) {
+          console.error(e);
+        }
+      };
+      img.src = previewImage;
+    } catch (err) {
+      console.error(err);
     }
   }
 
@@ -420,7 +488,21 @@ export function DashboardClient({
         }
       }
 
-      const codes = await runGridDetection(finalImageUrl, page);
+      const initL = Math.round((Number(page.margin_left) || 0.08) * 100);
+      const initR = Math.round((Number(page.margin_right) || 0.08) * 100);
+      const initT = Math.round((Number(page.margin_top) || 0.08) * 100);
+      const initB = Math.round((Number(page.margin_bottom) || 0.08) * 100);
+      setCustomMarginLeft(initL);
+      setCustomMarginRight(initR);
+      setCustomMarginTop(initT);
+      setCustomMarginBottom(initB);
+
+      const codes = await runGridDetection(finalImageUrl, page, {
+        left: initL / 100,
+        right: initR / 100,
+        top: initT / 100,
+        bottom: initB / 100,
+      });
       setDetectedCodes(codes);
       setEditCodesText(codes.join(", "));
       setDetectedCountries(page.section_name || "Especiales");
@@ -649,10 +731,10 @@ export function DashboardClient({
                       const code = sticker.key_code || sticker.code;
 
                       // Calculate percentages
-                      const leftMargin = (selectedPage.margin_left ?? 0.05) * 100;
-                      const rightMargin = (selectedPage.margin_right ?? 0.05) * 100;
-                      const topMargin = (selectedPage.margin_top ?? 0.05) * 100;
-                      const bottomMargin = (selectedPage.margin_bottom ?? 0.05) * 100;
+                      const leftMargin = customMarginLeft;
+                      const rightMargin = customMarginRight;
+                      const topMargin = customMarginTop;
+                      const bottomMargin = customMarginBottom;
                       const gridW = 100 - leftMargin - rightMargin;
                       const gridH = 100 - topMargin - bottomMargin;
                       const cellW = gridW / selectedPage.cols;
@@ -795,6 +877,89 @@ export function DashboardClient({
                   <span className="text-[9px] text-slate-500 mt-1">
                     Puedes escribir los códigos a mano, borrar o corregir lecturas.
                   </span>
+                </div>
+
+                {/* 4. Accordion for adjusting margins */}
+                <div className="border border-slate-800 rounded-lg p-3 bg-slate-950/40">
+                  <button
+                    type="button"
+                    onClick={() => setShowGridSettings(!showGridSettings)}
+                    className="flex items-center justify-between w-full text-xs font-bold uppercase tracking-wider text-slate-400 cursor-pointer"
+                  >
+                    <span>Ajustar Márgenes de Cuadrícula</span>
+                    <span className="text-[10px] text-emerald-400">{showGridSettings ? "Ocultar" : "Mostrar"}</span>
+                  </button>
+
+                  {showGridSettings && (
+                    <div className="mt-3 space-y-3 pt-2 border-t border-slate-800/60">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] text-slate-500 block mb-1">Izquierdo: {customMarginLeft}%</label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="25"
+                            step="1"
+                            value={customMarginLeft}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setCustomMarginLeft(val);
+                              handleReRunGrid(val, customMarginRight, customMarginTop, customMarginBottom);
+                            }}
+                            className="w-full accent-emerald-500 cursor-pointer"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-500 block mb-1">Derecho: {customMarginRight}%</label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="25"
+                            step="1"
+                            value={customMarginRight}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setCustomMarginRight(val);
+                              handleReRunGrid(customMarginLeft, val, customMarginTop, customMarginBottom);
+                            }}
+                            className="w-full accent-emerald-500 cursor-pointer"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-500 block mb-1">Superior: {customMarginTop}%</label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="25"
+                            step="1"
+                            value={customMarginTop}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setCustomMarginTop(val);
+                              handleReRunGrid(customMarginLeft, customMarginRight, val, customMarginBottom);
+                            }}
+                            className="w-full accent-emerald-500 cursor-pointer"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-500 block mb-1">Inferior: {customMarginBottom}%</label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="25"
+                            step="1"
+                            value={customMarginBottom}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setCustomMarginBottom(val);
+                              handleReRunGrid(customMarginLeft, customMarginRight, customMarginTop, val);
+                            }}
+                            className="w-full accent-emerald-500 cursor-pointer"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
