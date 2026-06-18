@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef } from "react";
 import Link from "next/link";
-import { Camera, Printer, Upload, X, Loader2, Save, RotateCcw, AlertTriangle, Info } from "lucide-react";
+import { Camera, Printer, Upload, X, Loader2, Save, RotateCcw, RotateCw, AlertTriangle, Info } from "lucide-react";
 import Tesseract from "tesseract.js";
 import type { Collection, Sticker, StickerStatus, AlbumPage, PageSticker } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
@@ -42,6 +42,83 @@ export function DashboardClient({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
+
+  const selectedPage = useMemo(() => {
+    return albumPages.find((p) => p.id === selectedPageId) ?? albumPages[0];
+  }, [albumPages, selectedPageId]);
+
+  const currentPageStickers = useMemo(() => {
+    if (!selectedPage) return [];
+    return pageStickers
+      .filter((ps) => ps.album_page_id === selectedPage.id)
+      .sort((a, b) => {
+        if (a.row_index !== b.row_index) return a.row_index - b.row_index;
+        return a.col_index - b.col_index;
+      });
+  }, [pageStickers, selectedPage]);
+
+  const currentEditCodesSet = useMemo(() => {
+    return new Set(
+      editCodesText
+        .split(/[\s,;]+/)
+        .map((c) => c.trim().toUpperCase().replace(/\s+/g, ""))
+        .filter(Boolean)
+    );
+  }, [editCodesText]);
+
+  function handleToggleCell(code: string) {
+    const cleanCode = code.trim().toUpperCase().replace(/\s+/g, "");
+    const currentCodes = editCodesText
+      .split(/[\s,;]+/)
+      .map((c) => c.trim().toUpperCase().replace(/\s+/g, ""))
+      .filter(Boolean);
+
+    const index = currentCodes.indexOf(cleanCode);
+    if (index > -1) {
+      currentCodes.splice(index, 1);
+    } else {
+      currentCodes.push(cleanCode);
+    }
+    setEditCodesText(currentCodes.join(", "));
+  }
+
+  async function handleRotateImage() {
+    if (!previewImage || !selectedPage) return;
+    setAnalyzing(true);
+    setError(null);
+    try {
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error("Error al cargar la imagen para rotación."));
+        img.src = previewImage;
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalHeight;
+      canvas.height = img.naturalWidth;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("No se pudo obtener el contexto de dibujo 2d.");
+
+      // Rotate 90 degrees clockwise
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+
+      const rotatedDataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      setPreviewImage(rotatedDataUrl);
+
+      // Re-run filled detection on the rotated image
+      const codes = await runGridDetection(rotatedDataUrl, selectedPage);
+      setDetectedCodes(codes);
+      setEditCodesText(codes.join(", "));
+    } catch (err: any) {
+      console.error(err);
+      setError("Error al rotar la imagen: " + (err.message || err));
+    } finally {
+      setAnalyzing(false);
+    }
+  }
 
   // 1. Calculate Stats
   const stats = useMemo(() => {
@@ -439,11 +516,74 @@ export function DashboardClient({
           {/* Camera Viewfinder / Preview */}
           <div className="relative flex-1 flex items-center justify-center overflow-hidden">
             {previewImage ? (
-              <img 
-                src={previewImage} 
-                alt="Captured" 
-                className="w-full h-full object-contain"
-              />
+              <div className="relative mx-auto inline-block border border-slate-800 rounded-lg overflow-hidden bg-slate-950 max-w-[90%] max-h-[70vh]">
+                <img 
+                  src={previewImage} 
+                  alt="Captured" 
+                  className="max-h-[45vh] sm:max-h-[50vh] w-auto block object-contain"
+                />
+                
+                {/* Visual Interactive Grid Overlay */}
+                {selectedPage && (
+                  <div className="absolute inset-0 select-none">
+                    {currentPageStickers.map((ps) => {
+                      const sticker = stickers.find((s) => s.id === ps.sticker_id);
+                      if (!sticker) return null;
+                      const code = sticker.key_code || sticker.code;
+
+                      // Calculate percentages
+                      const leftMargin = (selectedPage.margin_left ?? 0.05) * 100;
+                      const rightMargin = (selectedPage.margin_right ?? 0.05) * 100;
+                      const topMargin = (selectedPage.margin_top ?? 0.05) * 100;
+                      const bottomMargin = (selectedPage.margin_bottom ?? 0.05) * 100;
+                      const gridW = 100 - leftMargin - rightMargin;
+                      const gridH = 100 - topMargin - bottomMargin;
+                      const cellW = gridW / selectedPage.cols;
+                      const cellH = gridH / selectedPage.rows;
+
+                      const left = leftMargin + ps.col_index * cellW;
+                      const top = topMargin + ps.row_index * cellH;
+
+                      const isDetected = currentEditCodesSet.has(code.toUpperCase().replace(/\s+/g, ""));
+
+                      return (
+                        <button
+                          key={ps.sticker_id}
+                          type="button"
+                          onClick={() => handleToggleCell(code)}
+                          className={`absolute pointer-events-auto border flex flex-col items-center justify-center text-[7px] sm:text-[9px] font-bold rounded transition-all cursor-pointer ${
+                            isDetected
+                              ? "border-emerald-500 bg-emerald-500/25 text-emerald-300 ring-1 ring-emerald-500"
+                              : "border-slate-650 bg-black/30 text-slate-300 hover:border-white hover:bg-slate-800/40"
+                          }`}
+                          style={{
+                            left: `${left}%`,
+                            top: `${top}%`,
+                            width: `${cellW}%`,
+                            height: `${cellH}%`,
+                          }}
+                          title={`Alternar ${code}`}
+                        >
+                          <span className="truncate max-w-full px-0.5">{code}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Rotate Button Floating Overlay */}
+                <div className="absolute bottom-2 right-2 z-20">
+                  <button
+                    type="button"
+                    onClick={handleRotateImage}
+                    className="flex items-center gap-1 bg-black/80 hover:bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[10px] font-semibold text-white transition-all cursor-pointer shadow-lg active:scale-95"
+                    title="Rotar imagen 90°"
+                  >
+                    <RotateCw className="h-3 w-3 text-emerald-400" />
+                    Rotar 90°
+                  </button>
+                </div>
+              </div>
             ) : (
               <>
                 <video
@@ -452,6 +592,18 @@ export function DashboardClient({
                   playsInline
                   muted
                 />
+                {streaming && (
+                  <div className="absolute inset-0 border-[30px] sm:border-[50px] border-black/50 pointer-events-none flex flex-col items-center justify-center z-10">
+                    <div className="w-full h-full border-2 border-dashed border-emerald-500/80 rounded-lg max-w-[85%] max-h-[80%] flex flex-col items-center justify-between p-4">
+                      <span className="bg-black/70 px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold text-emerald-400">
+                        ENFOQUE: PÁGINA COMPLETA
+                      </span>
+                      <span className="bg-black/70 px-3 py-1.5 rounded-full text-[10px] sm:text-xs text-center text-slate-300 max-w-[95%]">
+                        Coloca la página del álbum horizontal y alineada en este recuadro.
+                      </span>
+                    </div>
+                  </div>
+                )}
                 {!streaming && (
                   <div className="flex flex-col items-center justify-center text-slate-500 gap-2">
                     <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
