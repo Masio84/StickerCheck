@@ -2,13 +2,14 @@
 
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, CheckCircle, Printer } from "lucide-react";
 import type {
   AlbumPage,
   Collection,
   PageSticker,
   ScanCellResult,
   Sticker,
+  StickerStatus,
 } from "@/lib/types";
 import { CameraCapture } from "@/components/scanner/CameraCapture";
 import { PageSelector } from "@/components/scanner/PageSelector";
@@ -27,15 +28,17 @@ interface ScannerClientProps {
   stickers: Sticker[];
   albumPages: AlbumPage[];
   pageStickers: PageSticker[];
+  initialUserStatus?: Record<string, { status: StickerStatus; duplicate_count: number }>;
 }
 
-type Step = "setup" | "capture" | "processing" | "review";
+type Step = "setup" | "capture" | "processing" | "review" | "success";
 
 export function ScannerClient({
   collection,
   stickers,
   albumPages,
   pageStickers,
+  initialUserStatus,
 }: ScannerClientProps) {
   const [step, setStep] = useState<Step>("setup");
   const [pageNumber, setPageNumber] = useState(albumPages[0]?.page_number ?? 1);
@@ -44,6 +47,8 @@ export function ScannerClient({
   const [cells, setCells] = useState<ScanCellResult[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [userStatus, setUserStatus] = useState<Record<string, { status: StickerStatus; duplicate_count: number }>>(initialUserStatus ?? {});
+  const [lastScannedCount, setLastScannedCount] = useState(0);
   const supabase = createClient();
 
   const stickerById = useMemo(
@@ -230,18 +235,34 @@ export function ScannerClient({
     } = await supabase.auth.getUser();
     if (!user) return;
 
+    const updatedStatus = { ...userStatus };
+
     for (const cell of selected) {
+      const existing = updatedStatus[cell.stickerId!];
+      let newStatus: StickerStatus = "owned";
+      let newDuplicateCount = 0;
+
+      if (existing) {
+        newStatus = "duplicate";
+        newDuplicateCount = existing.duplicate_count + 1;
+      }
+
       await supabase.from("user_stickers").upsert(
         {
           user_id: user.id,
           collection_id: collection.id,
           sticker_id: cell.stickerId!,
-          status: "owned",
-          duplicate_count: 0,
+          status: newStatus,
+          duplicate_count: newDuplicateCount,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "user_id,sticker_id" }
       );
+
+      updatedStatus[cell.stickerId!] = {
+        status: newStatus,
+        duplicate_count: newDuplicateCount,
+      };
     }
 
     await supabase.from("scan_sessions").insert({
@@ -254,8 +275,10 @@ export function ScannerClient({
       },
     });
 
+    setUserStatus(updatedStatus);
+    setLastScannedCount(selected.length);
     setSaving(false);
-    window.location.href = `/collections/${collection.slug}`;
+    setStep("success");
   };
 
   return (
@@ -351,16 +374,59 @@ export function ScannerClient({
               onToggle={handleToggle}
               onConfirm={handleConfirm}
               saving={saving}
+              userStatus={userStatus}
             />
             <button
               onClick={() => {
                 setCells([]);
                 setStep("capture");
               }}
-              className="text-sm text-slate-500 hover:text-slate-300"
+              className="text-sm text-slate-500 hover:text-slate-300 cursor-pointer"
             >
               Escanear otra foto
             </button>
+          </div>
+        )}
+
+        {step === "success" && (
+          <div className="flex flex-col items-center py-8 text-center">
+            <div className="rounded-full bg-emerald-500/10 p-3 text-emerald-400">
+              <CheckCircle className="h-16 w-16 animate-bounce" />
+            </div>
+            <h2 className="mt-6 text-2xl font-bold text-white">¡Cromos guardados con éxito!</h2>
+            <p className="mt-2 max-w-md text-slate-400">
+              Se han agregado {lastScannedCount} cromos a tu colección. Las repetidas se marcaron automáticamente.
+            </p>
+
+            <div className="mt-8 flex flex-col gap-3 w-full max-w-md">
+              <button
+                onClick={() => {
+                  window.open(`/collections/${collection.slug}/print`, "_blank");
+                }}
+                className="flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 py-3 font-semibold text-white hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+              >
+                <Printer className="h-5 w-5" />
+                Imprimir Reporte (PDF)
+              </button>
+
+              <div className="grid grid-cols-2 gap-3 mt-2">
+                <button
+                  onClick={() => {
+                    setCells([]);
+                    setStep("setup");
+                  }}
+                  className="rounded-lg border border-slate-700 bg-slate-800/50 py-3 text-sm font-medium text-white hover:bg-slate-700 transition-colors cursor-pointer"
+                >
+                  Escanear otra página
+                </button>
+                <Link
+                  href={`/collections/${collection.slug}`}
+                  className="flex items-center justify-center rounded-lg bg-slate-700 py-3 text-sm font-medium text-white hover:bg-slate-600 transition-colors"
+                >
+                  Ir al Checklist
+                </Link>
+              </div>
+            </div>
           </div>
         )}
       </div>

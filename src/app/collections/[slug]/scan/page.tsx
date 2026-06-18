@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ScannerClient } from "@/components/scanner/ScannerClient";
+import type { StickerStatus } from "@/lib/types";
 
 export default async function ScanPage({
   params,
@@ -56,6 +57,21 @@ export default async function ScanPage({
     pageStickers = data ?? [];
   }
 
+  // Load user stickers to check what is already owned (for duplicate warning/detection)
+  const { data: userStickers } = await supabase
+    .from("user_stickers")
+    .select("sticker_id, status, duplicate_count")
+    .eq("user_id", user.id)
+    .eq("collection_id", collection.id);
+
+  const userStatus: Record<string, { status: StickerStatus; duplicate_count: number }> = {};
+  userStickers?.forEach((us) => {
+    userStatus[us.sticker_id] = {
+      status: us.status as StickerStatus,
+      duplicate_count: us.duplicate_count,
+    };
+  });
+
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
@@ -65,9 +81,11 @@ export default async function ScanPage({
           stickers={stickers ?? []}
           albumPages={albumPages ?? []}
           pageStickers={pageStickers}
+          initialUserStatus={userStatus}
         />
       </main>
       <Footer />
     </div>
   );
 }
+
