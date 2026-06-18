@@ -82,7 +82,7 @@ export function parseAlbumCsv(csvPath: string): CsvStickerRow[] {
 export function gridForCount(count: number): { rows: number; cols: number } {
   if (count <= 1) return { rows: 1, cols: 1 };
   if (count >= 18 && count <= 20) {
-    return { rows: 3, cols: 10 };
+    return { rows: 4, cols: 8 };
   }
   if (count <= 8) return { rows: 2, cols: 4 };
   if (count <= 12) return { rows: 3, cols: 4 };
