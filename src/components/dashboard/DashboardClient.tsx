@@ -2,14 +2,18 @@
 
 import { useState, useMemo, useRef } from "react";
 import Link from "next/link";
-import { Camera, Printer, Upload, X, Loader2, Save, RotateCcw, AlertTriangle } from "lucide-react";
+import { Camera, Printer, Upload, X, Loader2, Save, RotateCcw, AlertTriangle, Info } from "lucide-react";
 import Tesseract from "tesseract.js";
-import type { Collection, Sticker, StickerStatus } from "@/lib/types";
+import type { Collection, Sticker, StickerStatus, AlbumPage, PageSticker } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
+import { extractCells, cropCell } from "@/lib/scanner/grid";
+import { detectFilled } from "@/lib/scanner/detect";
 
 interface DashboardClientProps {
   collection: Collection;
   stickers: Sticker[];
+  albumPages: AlbumPage[];
+  pageStickers: PageSticker[];
   initialUserStatus: Record<string, { status: StickerStatus; duplicate_count: number }>;
   userEmail: string;
 }
@@ -17,6 +21,8 @@ interface DashboardClientProps {
 export function DashboardClient({
   collection,
   stickers,
+  albumPages,
+  pageStickers,
   initialUserStatus,
   userEmail,
 }: DashboardClientProps) {
@@ -28,6 +34,7 @@ export function DashboardClient({
   const [detectedCodes, setDetectedCodes] = useState<string[]>([]);
   const [detectedCountries, setDetectedCountries] = useState<string>("");
   const [editCodesText, setEditCodesText] = useState<string>("");
+  const [selectedPageId, setSelectedPageId] = useState<string>(albumPages[0]?.id ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -121,36 +128,95 @@ export function DashboardClient({
     reader.readAsDataURL(file);
   }
 
-  // 3. OCR & Code Extraction
+  // 3. Run filled detection by page grid
+  const runGridDetection = (
+    imageDataUrl: string,
+    page: AlbumPage
+  ): Promise<string[]> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const margins = {
+            top: Number(page.margin_top) || 0.05,
+            left: Number(page.margin_left) || 0.05,
+            bottom: Number(page.margin_bottom) || 0.05,
+            right: Number(page.margin_right) || 0.05,
+          };
+
+          const { regions, canvas } = extractCells(img, page.rows, page.cols, margins);
+          const codes: string[] = [];
+
+          const currentPageStickers = pageStickers.filter(
+            (ps) => ps.album_page_id === page.id
+          );
+          const stickerById = Object.fromEntries(stickers.map((s) => [s.id, s]));
+
+          regions.forEach((region) => {
+            const cellCanvas = cropCell(canvas, region);
+            const detection = detectFilled(cellCanvas);
+            
+            if (detection.filled) {
+              const match = currentPageStickers.find(
+                (ps) => ps.row_index === region.row && ps.col_index === region.col
+              );
+              if (match) {
+                const sticker = stickerById[match.sticker_id];
+                if (sticker) {
+                  codes.push(sticker.key_code || sticker.code);
+                }
+              }
+            }
+          });
+          resolve(codes);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.onerror = () => reject(new Error("Error al cargar la imagen capturada."));
+      img.src = imageDataUrl;
+    });
+  };
+
+  // 4. OCR heading detection + visual grid check
   async function runOcrAnalysis(imageDataUrl: string) {
     setAnalyzing(true);
     setError(null);
     try {
+      // Step A: OCR Heading Detection
       const { data } = await Tesseract.recognize(imageDataUrl, "eng");
       const text = data.text;
       
-      // Extract matches
-      const codes = extractCodesFromText(text);
-      setDetectedCodes(codes);
+      const cleanedText = text.toUpperCase();
+      let matchedPage = albumPages[0]; // Default fallback
+      let found = false;
 
-      // Extract countries
-      const countryNames = new Set<string>();
-      codes.forEach((code) => {
-        const s = stickers.find((item) => (item.key_code || item.code).toUpperCase() === code);
-        if (s) {
-          countryNames.add(s.country || s.source || "Especiales");
+      // Look for page headers (e.g. "MEXICO", "SOUTH AFRICA")
+      for (const page of albumPages) {
+        if (page.section_name) {
+          const sectionUpper = page.section_name.toUpperCase();
+          if (cleanedText.includes(sectionUpper)) {
+            matchedPage = page;
+            found = true;
+            break;
+          }
         }
-      });
+      }
+
+      // Step B: Run Grid contrast checking for the detected page
+      setSelectedPageId(matchedPage.id);
+      const codes = await runGridDetection(imageDataUrl, matchedPage);
       
-      const countriesStr = countryNames.size > 0 
-        ? [...countryNames].join(", ") 
-        : "No identificado (Ninguno)";
-        
-      setDetectedCountries(countriesStr);
+      setDetectedCodes(codes);
+      setDetectedCountries(matchedPage.section_name || "Especiales");
       setEditCodesText(codes.join(", "));
+      
+      if (!found) {
+        setError("No pudimos identificar la sección automáticamente. Por favor selecciónala de la lista abajo.");
+      }
     } catch (err: any) {
       console.error(err);
-      setError("Error durante la lectura del OCR. Por favor ingresa los códigos manualmente.");
+      setError("Error durante el análisis. Por favor selecciona el país/sección manualmente.");
       setEditCodesText("");
       setDetectedCountries("Error");
     } finally {
@@ -158,47 +224,28 @@ export function DashboardClient({
     }
   }
 
-  function extractCodesFromText(text: string): string[] {
-    const cleaned = text.toUpperCase();
-    
-    // Create map of normalized sticker codes to actual codes
-    const validCodesMap = new Map<string, string>();
-    stickers.forEach((s) => {
-      const key = (s.key_code || s.code).toUpperCase().replace(/\s+/g, "");
-      validCodesMap.set(key, s.key_code || s.code);
-    });
+  // Handle manual dropdown change - instantly re-analyze the image
+  async function handlePageChange(pageId: string) {
+    const page = albumPages.find((p) => p.id === pageId);
+    if (!page || !previewImage) return;
 
-    const detected = new Set<string>();
-    
-    // Regex for FWC, CC, and standard 3-letter codes like MEX, RSA, KOR, CZE
-    const regex = /\b(00|FWC\d+|CC\d+|[A-Z]{3}\d+)\b/g;
-    
-    // Normalize spaces: e.g. "MEX 5" -> "MEX5"
-    const normalizedText = cleaned.replace(/\b(FWC|CC|[A-Z]{3})\s*(\d+)\b/g, "$1$2");
-    
-    const matches = normalizedText.match(regex) || [];
-    matches.forEach((m) => {
-      const norm = m.replace(/\s+/g, "");
-      if (validCodesMap.has(norm)) {
-        detected.add(validCodesMap.get(norm)!);
-      }
-    });
-
-    // Substring backup search within spaces
-    const words = cleaned.split(/[\s,.;:!?()]+/);
-    words.forEach((word) => {
-      const m = word.match(/(00|FWC\d+|CC\d+|[A-Z]{3}\d+)/);
-      if (m && m[1]) {
-        if (validCodesMap.has(m[1])) {
-          detected.add(validCodesMap.get(m[1])!);
-        }
-      }
-    });
-
-    return [...detected];
+    setAnalyzing(true);
+    setError(null);
+    try {
+      const codes = await runGridDetection(previewImage, page);
+      setDetectedCodes(codes);
+      setEditCodesText(codes.join(", "));
+      setDetectedCountries(page.section_name || "Especiales");
+      setSelectedPageId(pageId);
+    } catch (err) {
+      console.error(err);
+      setError("Error al procesar la cuadrícula del país seleccionado.");
+    } finally {
+      setAnalyzing(false);
+    }
   }
 
-  // 4. Save Database Updates
+  // 5. Save Database Updates
   async function handleSave() {
     setSaving(true);
     setError(null);
@@ -305,7 +352,7 @@ export function DashboardClient({
   }
 
   return (
-    <div className="mx-auto max-w-xl px-4 py-8">
+    <div className="mx-auto max-w-xl px-4 py-8 text-slate-100">
       {/* 1. Header user detail */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
         <div>
@@ -416,7 +463,7 @@ export function DashboardClient({
 
             {/* OCR Analyzing Loader */}
             {analyzing && (
-              <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center text-center p-6">
+              <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center text-center p-6 z-25">
                 <Loader2 className="h-12 w-12 animate-spin text-emerald-400" />
                 <h4 className="mt-4 text-lg font-bold text-white">Analizando foto...</h4>
                 <p className="text-xs text-slate-400 mt-2 max-w-xs">
@@ -432,23 +479,35 @@ export function DashboardClient({
               <h4 className="font-bold text-white text-base">Resultado del Análisis</h4>
 
               {error && (
-                <div className="mt-3 flex items-start gap-2 rounded-lg bg-red-500/10 p-3 text-xs text-red-400">
-                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                <div className="mt-3 flex items-start gap-2 rounded-lg bg-amber-500/10 p-3 text-xs text-amber-300">
+                  <Info className="h-4 w-4 shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
               )}
 
               <div className="mt-4 space-y-3">
-                {/* 1. Country Display */}
+                {/* 1. Page/Section selector Dropdown */}
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">País / Sección Detectado</span>
-                  <p className="text-sm font-semibold text-emerald-400 mt-0.5">{detectedCountries || "Identificando..."}</p>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">
+                    País / Sección del Álbum
+                  </label>
+                  <select
+                    value={selectedPageId}
+                    onChange={(e) => handlePageChange(e.target.value)}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 p-2.5 text-sm text-white focus:border-emerald-500 focus:outline-none cursor-pointer"
+                  >
+                    {albumPages.map((page) => (
+                      <option key={page.id} value={page.id}>
+                        {page.section_name || `Página ${page.page_number}`}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* 2. Detected count */}
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Stickers Detectados</span>
-                  <p className="text-sm font-semibold text-white mt-0.5">{detectedCodes.length} stickers encontrados</p>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Stickers Pegados Detectados</span>
+                  <p className="text-sm font-semibold text-emerald-400 mt-0.5">{detectedCodes.length} stickers encontrados</p>
                 </div>
 
                 {/* 3. Text area for editing codes */}
@@ -464,7 +523,7 @@ export function DashboardClient({
                     className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm font-mono text-white placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   />
                   <span className="text-[9px] text-slate-500 mt-1">
-                    Puedes agregar cromos faltantes o borrar lecturas incorrectas.
+                    Puedes escribir los códigos a mano, borrar o corregir lecturas.
                   </span>
                 </div>
               </div>
@@ -535,7 +594,7 @@ export function DashboardClient({
                 <div className="w-14 h-14 rounded-full bg-white/80 active:bg-white" />
               </button>
 
-              {/* Space holder or gallery button */}
+              {/* Space holder */}
               <div className="w-11" />
             </div>
           )}

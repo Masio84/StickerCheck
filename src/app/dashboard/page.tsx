@@ -54,6 +54,24 @@ export default async function DashboardPage() {
     .eq("collection_id", collection.id)
     .order("sort_order");
 
+  // Fetch album pages grid configurations
+  const { data: albumPages } = await supabase
+    .from("album_pages")
+    .select("*")
+    .eq("collection_id", collection.id)
+    .order("page_number");
+
+  // Fetch page sticker coordinates mapping
+  const pageIds = albumPages?.map((p) => p.id) ?? [];
+  let pageStickers: any[] = [];
+  if (pageIds.length > 0) {
+    const { data } = await supabase
+      .from("page_stickers")
+      .select("*")
+      .in("album_page_id", pageIds);
+    pageStickers = data ?? [];
+  }
+
   // Fetch user progress
   const { data: userStickers } = await supabase
     .from("user_stickers")
@@ -76,6 +94,8 @@ export default async function DashboardPage() {
         <DashboardClient
           collection={collection}
           stickers={stickers ?? []}
+          albumPages={albumPages ?? []}
+          pageStickers={pageStickers}
           initialUserStatus={userStatus}
           userEmail={user.email ?? "Usuario"}
         />
@@ -84,4 +104,5 @@ export default async function DashboardPage() {
     </div>
   );
 }
+
 
