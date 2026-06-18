@@ -153,26 +153,26 @@ async function seed() {
 
         if (isTeamPage) {
           const mapping = [
-            { row: 0, col: 3 }, // index 0 (MEX 1 / KOR 1)
-            { row: 0, col: 4 }, // index 1 (MEX 2 / KOR 2)
-            { row: 0, col: 2 }, // index 2 (MEX 3 / KOR 3)
-            { row: 0, col: 1 }, // index 3 (MEX 4 / KOR 4)
-            { row: 1, col: 3 }, // index 4 (MEX 5 / KOR 5)
-            { row: 1, col: 4 }, // index 5 (MEX 6 / KOR 6)
-            { row: 1, col: 2 }, // index 6 (MEX 7 / KOR 7)
-            { row: 1, col: 1 }, // index 7 (MEX 8 / KOR 8)
-            { row: 2, col: 3 }, // index 8 (MEX 9 / KOR 9)
-            { row: 2, col: 4 }, // index 9 (MEX 10 / KOR 10)
-            { row: 0, col: 5 }, // index 10 (MEX 11 / KOR 11) -> Top-Left of Right Page (HWANG)
-            { row: 0, col: 6 }, // index 11 (MEX 12 / KOR 12) -> Top-Middle of Right Page (LEE)
-            { row: 2, col: 9 }, // index 12 (MEX 13 / KOR 13) -> Bottom-Right of Right Page
-            { row: 1, col: 5 }, // index 13 (MEX 14 / KOR 14) -> Middle-Left of Right Page
-            { row: 1, col: 6 }, // index 14 (MEX 15 / KOR 15) -> Middle-Middle-Left of Right Page
-            { row: 1, col: 7 }, // index 15 (MEX 16 / KOR 16) -> Middle-Middle of Right Page
-            { row: 1, col: 9 }, // index 16 (MEX 17 / KOR 17) -> Middle-Right of Right Page (CHO)
-            { row: 2, col: 6 }, // index 17 (MEX 18 / KOR 18) -> Bottom-Middle-Left of Right Page
-            { row: 2, col: 7 }, // index 18 (MEX 19 / KOR 19) -> Bottom-Middle of Right Page
-            { row: 2, col: 8 }, // index 19 (MEX 20 / KOR 20) -> Bottom-Middle-Right of Right Page
+            { row: 0, col: 2 }, // index 0 (MEX 1 / KOR 1 / CAN 1)
+            { row: 0, col: 3 }, // index 1 (MEX 2 / KOR 2 / CAN 2)
+            { row: 0, col: 1 }, // index 2 (MEX 3 / KOR 3 / CAN 3)
+            { row: 0, col: 0 }, // index 3 (MEX 4 / KOR 4 / CAN 4)
+            { row: 1, col: 2 }, // index 4 (MEX 5 / KOR 5 / CAN 5)
+            { row: 1, col: 3 }, // index 5 (MEX 6 / KOR 6 / CAN 6)
+            { row: 1, col: 1 }, // index 6 (MEX 7 / KOR 7 / CAN 7)
+            { row: 1, col: 0 }, // index 7 (MEX 8 / KOR 8 / CAN 8)
+            { row: 2, col: 2 }, // index 8 (MEX 9 / KOR 9 / CAN 9)
+            { row: 2, col: 3 }, // index 9 (MEX 10 / KOR 10 / CAN 10)
+            { row: 0, col: 5 }, // index 10 (MEX 11 / KOR 11 / CAN 11) -> Top-Left of Right Page (HWANG)
+            { row: 0, col: 6 }, // index 11 (MEX 12 / KOR 12 / CAN 12) -> Top-Middle of Right Page (LEE)
+            { row: 2, col: 9 }, // index 12 (MEX 13 / KOR 13 / CAN 13) -> Bottom-Right of Right Page
+            { row: 1, col: 5 }, // index 13 (MEX 14 / KOR 14 / CAN 14) -> Middle-Left of Right Page
+            { row: 1, col: 6 }, // index 14 (MEX 15 / KOR 15 / CAN 15) -> Middle-Middle-Left of Right Page
+            { row: 1, col: 7 }, // index 15 (MEX 16 / KOR 16 / CAN 16) -> Middle-Middle of Right Page
+            { row: 1, col: 9 }, // index 16 (MEX 17 / KOR 17 / CAN 17) -> Middle-Right of Right Page (CHO)
+            { row: 2, col: 6 }, // index 17 (MEX 18 / KOR 18 / CAN 18) -> Bottom-Middle-Left of Right Page
+            { row: 2, col: 7 }, // index 18 (MEX 19 / KOR 19 / CAN 19) -> Bottom-Middle of Right Page
+            { row: 2, col: 8 }, // index 19 (MEX 20 / KOR 20 / CAN 20) -> Bottom-Middle-Right of Right Page
           ];
           if (index < mapping.length) {
             row_index = mapping[index].row;

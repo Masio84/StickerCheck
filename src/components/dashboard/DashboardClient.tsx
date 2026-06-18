@@ -18,6 +18,63 @@ interface DashboardClientProps {
   userEmail: string;
 }
 
+function resizeAndRotateImage(
+  img: HTMLImageElement,
+  rotation: number,
+  maxDim: number = 800
+): string {
+  const canvas = document.createElement("canvas");
+  let w = img.naturalWidth;
+  let h = img.naturalHeight;
+
+  if (w > maxDim || h > maxDim) {
+    const scale = Math.min(maxDim / w, maxDim / h);
+    w = Math.round(w * scale);
+    h = Math.round(h * scale);
+  }
+
+  if (rotation === 90 || rotation === 270) {
+    canvas.width = h;
+    canvas.height = w;
+  } else {
+    canvas.width = w;
+    canvas.height = h;
+  }
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return img.src;
+
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((rotation * Math.PI) / 180);
+  ctx.drawImage(img, -w / 2, -h / 2, w, h);
+
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+function rotateFullResImage(img: HTMLImageElement, rotation: number): string {
+  if (rotation === 0) return img.src;
+  const canvas = document.createElement("canvas");
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+
+  if (rotation === 90 || rotation === 270) {
+    canvas.width = h;
+    canvas.height = w;
+  } else {
+    canvas.width = w;
+    canvas.height = h;
+  }
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return img.src;
+
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((rotation * Math.PI) / 180);
+  ctx.drawImage(img, -w / 2, -h / 2);
+
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
 export function DashboardClient({
   collection,
   stickers,
@@ -261,27 +318,47 @@ export function DashboardClient({
     setAnalyzing(true);
     setError(null);
     try {
-      // Step A: OCR Heading Detection
-      const { data } = await Tesseract.recognize(imageDataUrl, "eng");
-      const text = data.text;
-      
-      const cleanedText = text.toUpperCase();
-      let matchedPage = albumPages[0]; // Default fallback
-      let found = false;
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error("Error al cargar la imagen capturada."));
+        img.src = imageDataUrl;
+      });
 
-      // Look for page headers (e.g. "MEXICO", "SOUTH AFRICA")
-      for (const page of albumPages) {
-        if (page.section_name) {
-          const sectionUpper = page.section_name.toUpperCase();
-          if (cleanedText.includes(sectionUpper)) {
-            matchedPage = page;
-            found = true;
-            break;
+      let matchedPage: AlbumPage | null = null;
+      let correctRotation = 0;
+
+      // Rotations to test for vertical/sideways camera orientations:
+      // - 0: Raw image
+      // - 270: rotated 90 degrees CCW (fixes portrait double-page layout with left page on top)
+      // - 90: rotated 90 degrees CW (fixes portrait double-page layout with right page on top)
+      // - 180: upside-down
+      const rotations = [0, 270, 90, 180];
+
+      for (const rot of rotations) {
+        // Create downscaled canvas for super fast OCR
+        const ocrImageSrc = resizeAndRotateImage(img, rot, 800);
+        
+        // Run OCR
+        const { data } = await Tesseract.recognize(ocrImageSrc, "eng");
+        const cleanedText = data.text.toUpperCase();
+        
+        // Match country/section name
+        for (const page of albumPages) {
+          if (page.section_name) {
+            const sectionUpper = page.section_name.toUpperCase();
+            if (cleanedText.includes(sectionUpper)) {
+              matchedPage = page;
+              correctRotation = rot;
+              break;
+            }
           }
         }
+        
+        if (matchedPage) break;
       }
 
-      if (!found) {
+      if (!matchedPage) {
         setSelectedPageId("");
         setDetectedCodes([]);
         setDetectedCountries("");
@@ -290,30 +367,9 @@ export function DashboardClient({
       } else {
         setSelectedPageId(matchedPage.id);
 
-        let finalImageUrl = imageDataUrl;
-        const img = new Image();
-        await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = () => reject(new Error("Error al cargar la imagen capturada."));
-          img.src = imageDataUrl;
-        });
-
-        const isImagePortrait = img.naturalHeight > img.naturalWidth;
-        const isPageLandscape = (matchedPage.cols || 5) > (matchedPage.rows || 4);
-
-        if (isImagePortrait && isPageLandscape) {
-          const canvas = document.createElement("canvas");
-          canvas.width = img.naturalHeight;
-          canvas.height = img.naturalWidth;
-          const ctx = canvas.getContext("2d");
-          if (ctx) {
-            ctx.translate(canvas.width / 2, canvas.height / 2);
-            ctx.rotate(Math.PI / 2);
-            ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-            finalImageUrl = canvas.toDataURL("image/jpeg", 0.85);
-            setPreviewImage(finalImageUrl);
-          }
-        }
+        // Auto-rotate the full-res preview image to landscape if a rotation was matching
+        const finalImageUrl = rotateFullResImage(img, correctRotation);
+        setPreviewImage(finalImageUrl);
 
         const codes = await runGridDetection(finalImageUrl, matchedPage);
         
